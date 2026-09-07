@@ -183,6 +183,11 @@ Three situations are kept distinct, because they need different responses:
 | listed, but no timetable link | nothing to read; typical of a course whose round is not open | a quiet line in the digest, no alarm |
 | absent entirely | the course looks dropped | an urgent push |
 
+If **no** courses can be read from the page at all, that is treated as the page
+being unreadable rather than as every course being dropped — a layout change is
+far likelier than a mass unenrolment. You get one push about the page, not one
+per watched course, and the last known links keep being polled.
+
 The middle case matters: it can come back on its own, so treating it as an
 error would mean an alarm at every round boundary. The old round's URL is not
 polled as a fallback either, since it would 404 or return stale data.

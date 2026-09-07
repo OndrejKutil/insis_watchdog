@@ -387,7 +387,9 @@ class TestEnrolmentRounds(unittest.TestCase):
 
             def courses(self, url):
                 if course_url is None:
-                    return []
+                    # Readable page, but our course is not on it any more.
+                    return [Course(code="OTHER", name="Something else",
+                                   schedule_url="https://x/y.pl?akce=zap-k1")]
                 return [Course(code="1AB234", name="Statistika",
                                schedule_url=course_url)]
 
@@ -612,7 +614,9 @@ class TestMissingTimetableLink(unittest.TestCase):
         self.assertEqual(list(w._state.values()), [UNAVAILABLE])
 
     def test_course_absent_entirely_is_still_an_alarm(self):
-        w = self._watcher([])
+        """A readable page that no longer lists the course means dropped."""
+        w = self._watcher([self.Course(code="OTHER", schedule_url="u")],
+                          slots=[])
         w.run(once=True)
         self.assertIn("InSIS - course missing", self.sent)
 
@@ -630,3 +634,53 @@ class TestMissingTimetableLink(unittest.TestCase):
         self.sent.clear()
         w.run(once=True)
         self.assertIn("InSIS - status changed", self.sent)
+
+
+class TestEnrolmentPageUnreadable(unittest.TestCase):
+    """
+    Every course vanishing at once is far more likely a changed page layout
+    than a mass unenrolment. Treating it as "all dropped" would fire an urgent
+    alarm per watch and stop polling.
+    """
+
+    def setUp(self):
+        from insis import notify
+        from insis.settings import Settings, Watch
+        from insis.watcher import Watcher
+
+        self.sent = []
+        notify.send = lambda u, m, **k: self.sent.append(k.get("title")) or True
+        notify.send_burst = lambda u, m, **k: self.sent.append(k.get("title")) or 1
+
+        self.Watcher = Watcher
+        self.settings = Settings(ntfy_topic="t", registrace_url="reg")
+        self.settings.save = lambda *a, **k: None
+        for n in (1, 2, 3):
+            self.settings.watches.append(
+                Watch(course_code=f"C{n}", schedule_url=f"u{n}",
+                      day="Po", time="09:15", room=f"R{n}"))
+
+    def _watcher(self, polled):
+        class Fake:
+            def courses(self, url):
+                return []
+
+            def slots(self, url):
+                polled.append(url)
+                return []
+        return self.Watcher(Fake(), self.settings, log=lambda m: None)
+
+    def test_no_mass_dropped_alarm(self):
+        w = self._watcher([])
+        w.run(once=True)
+        self.assertNotIn("InSIS - course missing", self.sent)
+
+    def test_reports_the_page_once_not_once_per_watch(self):
+        w = self._watcher([])
+        w.run(once=True)
+        self.assertEqual(self.sent.count("InSIS - enrolment page unreadable"), 1)
+
+    def test_keeps_polling_the_known_links(self):
+        polled = []
+        self._watcher(polled).run(once=True)
+        self.assertEqual(sorted(polled), ["u1", "u2", "u3"])

@@ -316,6 +316,22 @@ class Watcher:
                     title="InSIS - enrolment page unreadable")
                 current = None
 
+            if current is not None and not current:
+                # Every course disappearing at once is far more likely to be
+                # the page changing shape than an actual mass unenrolment.
+                # Treating it as "all dropped" would fire an urgent alarm per
+                # watch and stop polling; treat it as unreadable instead and
+                # keep using the links we already have.
+                self.log("  enrolment page parsed to zero courses - "
+                         "treating it as unreadable")
+                self._warn_once(
+                    "enrolment-page",
+                    "Your enrolment page loaded but no courses could be read "
+                    "from it.\nThe page layout may have changed. Still trying "
+                    "the last known timetable links.",
+                    title="InSIS - enrolment page unreadable")
+                current = None
+
             for w in pending:
                 try:
                     url = (self._url_for(w, current) if current is not None
