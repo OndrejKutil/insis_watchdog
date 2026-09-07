@@ -556,3 +556,77 @@ class TestChangeDigest(unittest.TestCase):
         self.sent.clear()
         self._run(w, None, "zap-k1")
         self.assertEqual(self.sent, [])
+
+
+class TestMissingTimetableLink(unittest.TestCase):
+    """
+    A course may appear on the enrolment page with no timetable link at all.
+    That is not the same as being dropped, and must not be alarming: it can
+    come back on its own when a round opens.
+    """
+
+    def setUp(self):
+        from insis import notify
+        from insis.settings import Settings, Watch
+        from insis.watcher import Watcher
+        from insis.models import Course
+
+        self.sent = []
+        notify.send = lambda u, m, **k: self.sent.append(k.get("title")) or True
+        notify.send_burst = lambda u, m, **k: self.sent.append(k.get("title")) or 1
+
+        self.Course, self.Watcher = Course, Watcher
+        self.settings = Settings(ntfy_topic="t", registrace_url="reg")
+        self.settings.save = lambda *a, **k: None
+        self.settings.watches.append(
+            Watch(course_code="C1", schedule_url="round-1-url",
+                  day="Po", time="09:15", room="R1"))
+
+    def _watcher(self, courses, slots=None):
+        Course = self.Course
+
+        class Fake:
+            def courses(self, url):
+                return courses
+
+            def slots(self, url):
+                if slots is None:
+                    raise AssertionError("should not poll without a link")
+                return slots
+        return self.Watcher(Fake(), self.settings, log=lambda m: None)
+
+    def test_no_link_is_quiet(self):
+        w = self._watcher([self.Course(code="C1", schedule_url=None)])
+        w.run(once=True)
+        self.assertEqual(self.sent, [])
+
+    def test_no_link_does_not_poll_the_old_round_url(self):
+        """Polling a previous round's URL would 404 or return stale data."""
+        w = self._watcher([self.Course(code="C1", schedule_url=None)])
+        w.run(once=True)          # Fake.slots raises if called
+
+    def test_no_link_records_unavailable(self):
+        from insis.models import UNAVAILABLE
+        w = self._watcher([self.Course(code="C1", schedule_url=None)])
+        w.run(once=True)
+        self.assertEqual(list(w._state.values()), [UNAVAILABLE])
+
+    def test_course_absent_entirely_is_still_an_alarm(self):
+        w = self._watcher([])
+        w.run(once=True)
+        self.assertIn("InSIS - course missing", self.sent)
+
+    def test_returning_link_is_reported_in_the_digest(self):
+        from insis.models import Slot, UNAVAILABLE
+        locked = [Slot(index=0, day="Po", time="09:15", room="R1",
+                       joined=10, capacity=25, action_id=None)]
+        w = self._watcher([self.Course(code="C1", schedule_url=None)])
+        w.run(once=True)
+        self.assertEqual(list(w._state.values()), [UNAVAILABLE])
+
+        w.insis.courses = lambda url: [
+            self.Course(code="C1", schedule_url="https://x/y.pl?akce=zap-k2")]
+        w.insis.slots = lambda url: locked
+        self.sent.clear()
+        w.run(once=True)
+        self.assertIn("InSIS - status changed", self.sent)

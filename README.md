@@ -175,8 +175,17 @@ working in the next. The watcher therefore **re-reads the enrolment page every
 cycle and re-resolves each watched course by its code**, following whatever
 link the current round uses. It never relies on the URL it saved.
 
-If a course vanishes from your enrolment page entirely, you get a push rather
-than silence.
+Three situations are kept distinct, because they need different responses:
+
+| On the enrolment page | Meaning | What you get |
+|---|---|---|
+| linked | normal | polled as usual |
+| listed, but no timetable link | nothing to read; typical of a course whose round is not open | a quiet line in the digest, no alarm |
+| absent entirely | the course looks dropped | an urgent push |
+
+The middle case matters: it can come back on its own, so treating it as an
+error would mean an alarm at every round boundary. The old round's URL is not
+polled as a fallback either, since it would 404 or return stale data.
 
 ### What you are told, and when
 

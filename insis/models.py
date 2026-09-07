@@ -9,6 +9,11 @@ from dataclasses import dataclass, field
 #           what a class outside the current enrolment round looks like
 YOURS, FREE, LOCKED, FULL = "YOURS", "FREE", "LOCKED", "FULL"
 
+# Not a slot state but a watch state: the course is still on the enrolment
+# page, yet offers no timetable link at all, so there is nothing to read.
+# Expected between enrolment rounds, so it must not be treated as an error.
+UNAVAILABLE = "UNAVAILABLE"
+
 
 @dataclass
 class Slot:

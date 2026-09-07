@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from . import notify
 from .client import SessionExpired
-from .models import FREE
+from .models import FREE, UNAVAILABLE
 from .settings import Settings, Watch
 
 
@@ -91,35 +91,56 @@ class Watcher:
         the current round without having to know how the parameter is spelled.
         """
         courses = self.insis.courses(self.settings.registrace_url)
-        return {c.code: c for c in courses if c.schedule_url}
+        # Keep courses that have no timetable link too. Absent from the page
+        # and present-but-unlinked are different situations: the first means
+        # the course is gone, the second is what a course outside the current
+        # enrolment round may look like.
+        return {c.code: c for c in courses}
 
     def _url_for(self, w: Watch, current: dict) -> str | None:
+        """
+        The timetable URL to poll for this watch, or None if there is none.
+
+        Three cases, and they must not be conflated. The course can be gone
+        from the enrolment page (dropped - worth an alarm); listed but with no
+        timetable link (nothing to read, but it can come back on its own, so
+        it is reported quietly); or linked, in which case the link is followed
+        even if it changed, because it carries the enrolment round.
+        """
         course = current.get(w.course_code)
+
         if course is None:
             self._warn_once(
                 f"gone:{w.course_code}",
                 f"{w.course_code} is no longer on your enrolment page.\n"
-                f"It may have been dropped, or the enrolment round has "
-                f"changed. Nothing is being watched for it.",
+                f"It looks like it was dropped. Nothing is being watched "
+                f"for it.",
                 title="InSIS - course missing")
-            return w.schedule_url or None
+            return None
+
+        self._warned.discard(f"gone:{w.course_code}")
+
+        if not course.schedule_url:
+            self.log(f"  {w.course_code}: no timetable link this round")
+            self._seen[self._key(w)] = UNAVAILABLE
+            return None
 
         if course.schedule_url != w.schedule_url:
-            # Expected between rounds; worth a log line but not an alarm.
-            self.log(f"  {w.course_code}: timetable URL changed "
+            self.log(f"  {w.course_code}: timetable link changed "
                      f"(new enrolment round?) - following it")
             w.schedule_url = course.schedule_url
             self.settings.save()
-        self._warned.discard(f"gone:{w.course_code}")
         return course.schedule_url
 
     # -- one watch ---------------------------------------------------------
 
     def check(self, w: Watch, url: str | None = None) -> Outcome:
         out = Outcome(watch=w)
-        url = url or w.schedule_url
         if not url:
-            out.error = "no timetable URL"
+            # Nothing to poll. Already recorded and logged by _url_for; do not
+            # fall back to a URL from an earlier round, which would either
+            # 404 or report stale data as if it were current.
+            out.error = "no timetable link"
             return out
 
         slots = self.insis.slots(url)
@@ -245,7 +266,10 @@ class Watcher:
             lines.append(f"{w.course_code} {w.day} {w.time} {w.room}: "
                          f"{before} -> {now}")
 
-        if self._round is None or not lines:
+        # Suppressed only when there is nothing to compare against, i.e. the
+        # very first cycle. Keying this on the round instead would swallow the
+        # digest whenever the first cycle happened to see no timetable links.
+        if not self._state or not lines:
             return
 
         self._push("\n".join(lines),
@@ -296,7 +320,8 @@ class Watcher:
                 try:
                     url = (self._url_for(w, current) if current is not None
                            else w.schedule_url)
-                    self.check(w, url)
+                    if url:
+                        self.check(w, url)
                 except SessionExpired:
                     return self._session_died()
                 except Exception as e:
