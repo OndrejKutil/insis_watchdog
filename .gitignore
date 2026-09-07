@@ -1,0 +1,29 @@
+# --- things that identify you -------------------------------------------
+# Your username, your studium/obdobi ids, your ntfy topic and your watch list.
+insis_state.json
+
+# Saved InSIS pages. These contain your name, study id and course list.
+captures/
+
+# Local development notes, kept out of the published repo.
+CLAUDE.md
+
+# --- environment ---------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# --- editors / OS --------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# --- leftovers -----------------------------------------------------------
+browser-profile/
+*.log
+*.err
